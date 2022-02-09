@@ -1,128 +1,146 @@
 import 'dart:async';
-
-@JS('midi_command')
-import 'package:js/js.dart';
-import 'dart:html' as html;
+import 'dart:js_util' as js_util;
 import 'dart:typed_data';
-import 'package:meta/meta.dart';
-import 'package:flutter_web_plugins/flutter_web_plugins.dart';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_midi_command_platform_interface/flutter_midi_command_platform_interface.dart';
+import 'package:flutter_midi_command_web/extensions.dart';
+import 'package:flutter_web_plugins/flutter_web_plugins.dart';
+import 'package:js/js.dart';
+import 'package:js_bindings/js_bindings.dart' as html;
 
+final List<html.MIDIInput> _webMidiInputs = [];
+final List<html.MIDIOutput> _webMidiOutputs = [];
+final List<MidiDevice> _connectedDevices = [];
+
+/// A web implementation of the FlutterMidiCommandWeb plugin.
 class FlutterMidiCommandWeb extends MidiCommandPlatform {
-  late html.Window _window;
+  final StreamController<MidiPacket> _rxStreamController =
+      StreamController<MidiPacket>.broadcast();
 
-  html.MidiAccess? _access;
+  final StreamController<String> _setupStreamController =
+      StreamController<String>.broadcast();
 
-  StreamController<Uint8List> _rxStreamController = StreamController<Uint8List>.broadcast();
-  Stream<Uint8List> _rxStream = StreamController<Uint8List>.broadcast().stream;
-  StreamController<String> _setupStreamController = StreamController<String>.broadcast();
-  Stream<String>? _setupStream;
+  late final Stream<String> _setupStream;
+  late final Stream<MidiPacket> _rxStream;
 
-  /// A constructor that allows tests to override the window object used by the plugin.
-  FlutterMidiCommandWeb({@visibleForTesting html.Window? window}) {
-    _window = window ?? html.window;
-    _requestMidiAccess();
-  }
-
-  /// Registers this class as the default instance of [UrlLauncherPlatform].
   static void registerWith(Registrar registrar) {
-    print("register web impl");
+    _log("register FlutterMidiCommandWeb");
     MidiCommandPlatform.instance = FlutterMidiCommandWeb();
   }
 
-  _requestMidiAccess() async {
-    print("request midi access");
-    _window.navigator.requestMidiAccess({'sysex': true}).then((value) {
-      print("succes $value");
-      _access = value;
-      print('inputs ${_access!.inputs}');
-      print('outputs ${_access!.outputs}');
+  FlutterMidiCommandWeb() {
+    _setupStream = _setupStreamController.stream;
+    _rxStream = _rxStreamController.stream;
 
-      _access!.on['statechange'].listen(_handleMIDIStateChange);
-    });
+    _initMidi();
   }
 
-  void handler(html.MidiAccess access) {
-    print("access $access");
+  void _initMidi() async {
+    final access = await html.window.navigator
+        .requestMIDIAccess(html.MIDIOptions(sysex: true, software: false));
+
+    // deal with bug: https://github.com/dart-lang/sdk/issues/33248
+    js_util.callMethod(access.inputs, 'forEach', [allowInterop(_getInputs)]);
+    js_util.callMethod(access.outputs, 'forEach', [allowInterop(_getOutputs)]);
+  }
+
+  void _getInputs(dynamic a, dynamic b, dynamic c) {
+    final inp = a as html.MIDIInput;
+    _log('input id, name: ${inp.id} | ${inp.name}');
+    _webMidiInputs.add(inp);
+  }
+
+  void _getOutputs(dynamic a, dynamic b, dynamic c) {
+    final outp = a as html.MIDIOutput;
+    _log('ouput id, name: ${outp.id} | ${outp.name}');
+    _webMidiOutputs.add(outp);
   }
 
   @override
-  Future<List<MidiDevice>?> get devices async {
-    // var devs = await _methodChannel.invokeMethod('getDevices');
-    // return devs.map<MidiDevice>((m) {
-    //   var map = m.cast<String, Object>();
-    //   return MidiDevice(map["id"], map["name"], map["type"], map["connected"] == "true");
-    // }).toList();
-
-    _access!.inputs!.forEach((key, value) {
-      print("input key ${key} ${value}");
-      // print("Input port [type:'${element.type}'] id:'${element.id}' manufacturer:'${element.manufacturer}' name:'${element.name}' version:'${element.version}'");
-      // element.value.onMidiMessage.listen(_handleMidiIn);
-      // html.MidiPort inPort = element as html.MidiPort;
-      // value.on['midimessage'].listen(_handleMidiIn);
-    });
-
-    _access!.outputs!.forEach((key, value) {
-      print("output ${key} ${value}");
-    });
-
-    return Future.value(null);
+  Future<List<MidiDevice>> get devices async {
+    final deviceMap = <String, MidiDevice>{};
+    int idCounter = 0;
+    for (var input in _webMidiInputs) {
+      final isConnected = _connectedDevices
+              .firstWhereOrNull((device) => device.name == input.name) !=
+          null;
+      final device = MidiDevice(input.id, input.name ?? '', "web", isConnected);
+      device.inputPorts.add(MidiPort(idCounter++, MidiPortType.IN));
+      deviceMap[input.name ?? input.id] = device;
+    }
+    idCounter = 0;
+    for (var output in _webMidiOutputs) {
+      final isConnected = _connectedDevices
+              .firstWhereOrNull((device) => device.name == output.name) !=
+          null;
+      final existingDevice = deviceMap[output.name];
+      if (existingDevice != null) {
+        existingDevice.outputPorts.add(MidiPort(idCounter++, MidiPortType.OUT));
+      } else {
+        final device =
+            MidiDevice(output.id, output.name ?? '', "web", isConnected);
+        device.outputPorts.add(MidiPort(idCounter++, MidiPortType.OUT));
+        deviceMap[output.name ?? output.id] = device;
+      }
+    }
+    return deviceMap.values.toList();
   }
-
-  _handleMIDIStateChange(evt) {
-    var connEvt = evt as html.MidiConnectionEvent;
-    print("state ${connEvt.port}");
-    _setupStreamController.sink.add(connEvt.type);
-  }
-
-  _handleMidiIn(html.MidiMessageEvent evt) {
-    print("midi in $evt");
-  }
-
-  /// Starts scanning for BLE MIDI devices.
-  ///
-  /// Found devices will be included in the list returned by [devices].
-  Future<void> startScanningForBluetoothDevices() async {}
-
-  /// Stop scanning for BLE MIDI devices.
-  void stopScanningForBluetoothDevices() {}
 
   /// Connects to the device.
   @override
-  void connectToDevice(MidiDevice device) {
-    // _methodChannel.invokeMethod('connectToDevice', device.toDictionary);
+  void connectToDevice(MidiDevice device, {List<MidiPort>? ports}) {
+    // connect up incoming webmidi data to our rx stream of MidiPackets
+    final inputPorts = _webMidiInputs.where((p) => p.name == device.name);
+    for (var inport in inputPorts) {
+      _log('connecting midi rx to: ${device.name}');
+      inport.onmidimessage = allowInterop((midiMesg) {
+        _rxStreamController.add(
+            // TODO: add actual timestamp param instead of 0
+            MidiPacket((midiMesg as html.MIDIMessageEvent).data, 0, device));
+      });
+    }
+    _connectedDevices.add(device);
+    _setupStreamController.add("deviceConnected");
   }
 
   /// Disconnects from the device.
   @override
-  void disconnectDevice(MidiDevice device) {
-    // _methodChannel.invokeMethod('disconnectDevice', device.toDictionary);
+  void disconnectDevice(MidiDevice device, {bool remove = true}) {
+    final inputPorts = _webMidiInputs.where((p) => p.name == device.name);
+    for (var inport in inputPorts) {
+      _log('connecting midi rx to: ${device.name}');
+      inport.onmidimessage = allowInterop((midiMesg) {
+        _rxStreamController.add(
+            // TODO: add actual timestamp param instead of 0
+            MidiPacket((midiMesg as html.MIDIMessageEvent).data, 0, device));
+      });
+      _connectedDevices.remove(device);
+      _setupStreamController.add("deviceDisconnected");
+    }
   }
 
   @override
   void teardown() {
-    // _methodChannel.invokeMethod('teardown');
+    //TODO: go through and call disconnect on all devics, then close rx stream
   }
 
-  /// Sends data to the currently connected device.
+  /// Sends data to the currently connected device.wmidi hardware driver name
   ///
   /// Data is an UInt8List of individual MIDI command bytes.
   @override
-  void sendData(Uint8List data) {
-    print("send $data through method channel");
-    // _methodChannel.invokeMethod('sendData', data);
+  void sendData(Uint8List data, {int? timestamp, String? deviceId}) {
+    // _connectedDevices.values.forEach((device) {
+    //   // print("send to $device");
+    //   device.send(data, data.length);
+    // });
   }
 
   /// Stream firing events whenever a midi package is received.
   ///
   /// The event contains the raw bytes contained in the MIDI package.
   @override
-  Stream<Uint8List> get onMidiDataReceived {
-    print("get on midi data");
-    // _rxStream ??= _rxChannel.receiveBroadcastStream().map<Uint8List>((d) {
-    //   return Uint8List.fromList(List<int>.from(d));
-    // });
-    _rxStream = _rxStreamController.stream;
+  Stream<MidiPacket>? get onMidiDataReceived {
     return _rxStream;
   }
 
@@ -131,7 +149,12 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
   /// For example, when a new BLE devices is discovered.
   @override
   Stream<String>? get onMidiSetupChanged {
-    _setupStream = _setupStreamController.stream;
     return _setupStream;
+  }
+}
+
+void _log(String mesg) {
+  if (kDebugMode) {
+    print(mesg);
   }
 }
