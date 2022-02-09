@@ -1,45 +1,42 @@
-import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:typed_data';
 
-import 'package:flutter/services.dart';
-import 'package:flutter_midi_command_web/flutter_midi_command_web.dart';
+import 'package:flutter/material.dart';
+
+import 'package:flutter_midi_command/flutter_midi_command.dart';
 
 void main() {
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatefulWidget {
+  const MyApp({Key? key}) : super(key: key);
+
   @override
-  _MyAppState createState() => _MyAppState();
+  State<MyApp> createState() => _MyAppState();
 }
 
 class _MyAppState extends State<MyApp> {
-  String _platformVersion = 'Unknown';
+  StreamSubscription<MidiPacket>? _rxSubscription;
+  final MidiCommand _midiCommand = MidiCommand();
+
+  Uint8List? lastMidiMesg;
 
   @override
   void initState() {
     super.initState();
-    initPlatformState();
+    _rxSubscription = _midiCommand.onMidiDataReceived?.listen((packet) {
+      print('received packet: ${packet.data}');
+      setState(() {
+        lastMidiMesg = packet.data;
+      });
+    });
   }
 
-  // Platform messages are asynchronous, so we initialize in an async method.
-  Future<void> initPlatformState() async {
-    String platformVersion;
-    // Platform messages may fail, so we use a try/catch PlatformException.
-    try {
-      platformVersion = await FlutterMidiCommandWeb.platformVersion;
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
-    }
-
-    // If the widget was removed from the tree while the asynchronous platform
-    // message was in flight, we want to discard the reply rather than calling
-    // setState to update our non-existent appearance.
-    if (!mounted) return;
-
-    setState(() {
-      _platformVersion = platformVersion;
-    });
+  @override
+  void dispose() {
+    _rxSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -50,9 +47,45 @@ class _MyAppState extends State<MyApp> {
           title: const Text('Plugin example app'),
         ),
         body: Center(
-          child: Text('Running on: $_platformVersion\n'),
-        ),
+            child: FutureBuilder<List<MidiDevice>?>(
+                future: _midiCommand.devices,
+                builder: (context, snapshot) {
+                  if (snapshot.data == null) {
+                    return const CircularProgressIndicator();
+                  }
+                  final devices = snapshot.data;
+                  if (devices == null) {
+                    return const Text('No Devices');
+                  }
+                  return Column(
+                    children: [
+                      Container(
+                        height: 200,
+                        child: ListView.builder(
+                            itemCount: devices.length,
+                            itemBuilder: (context, index) {
+                              return MaterialButton(
+                                child: Text(_deviceLabel(devices[index])),
+                                onPressed: () {
+                                  setState(() {
+                                    _midiCommand
+                                        .connectToDevice(devices[index]);
+                                  });
+                                },
+                              );
+                            }),
+                      ),
+                      Text('Last midi: $lastMidiMesg'),
+                    ],
+                  );
+                })),
       ),
     );
+  }
+
+  String _deviceLabel(MidiDevice device) {
+    return device.connected
+        ? '${device.name} CONNECTED'
+        : 'connect: ${device.name}';
   }
 }
