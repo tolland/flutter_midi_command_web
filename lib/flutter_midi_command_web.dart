@@ -1,13 +1,14 @@
 import 'dart:async';
+import 'dart:js';
 import 'dart:js_util' as js_util;
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_midi_command_platform_interface/flutter_midi_command_platform_interface.dart';
 import 'package:flutter_midi_command_web/extensions.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
-import 'package:js/js.dart';
+//import 'package:js/js.dart';
 import 'package:js_bindings/js_bindings.dart' as html;
+//import 'package:typings/core.dart' as html;
 
 final List<html.MIDIInput> _webMidiInputs = [];
 final List<html.MIDIOutput> _webMidiOutputs = [];
@@ -36,7 +37,7 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
     _initMidi();
   }
 
-  void _initMidi() async {
+  Future<void> _initMidi() async {
     final access = await html.window.navigator
         .requestMIDIAccess(html.MIDIOptions(sysex: true, software: false));
 
@@ -89,7 +90,8 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
 
   /// Connects to the device.
   @override
-  void connectToDevice(MidiDevice device, {List<MidiPort>? ports}) {
+  Future<void> connectToDevice(MidiDevice device,
+      {List<MidiPort>? ports}) async {
     // connect up incoming webmidi data to our rx stream of MidiPackets
     final inputPorts = _webMidiInputs.where((p) => p.name == device.name);
     for (var inport in inputPorts) {
@@ -122,7 +124,11 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
 
   @override
   void teardown() {
-    //TODO: go through and call disconnect on all devics, then close rx stream
+    //go through and call disconnect on all devics, then close rx stream
+    for (MidiDevice device in _connectedDevices) {
+      disconnectDevice(device);
+    }
+    _rxStreamController.close();
   }
 
   /// Sends data to the currently connected device.wmidi hardware driver name
@@ -134,6 +140,19 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
     //   // print("send to $device");
     //   device.send(data, data.length);
     // });
+
+    _webMidiOutputs.forEach((output) {
+      // print("send to $device");
+      double ts = timestamp == null ? 0.0 : timestamp.toDouble();
+
+      if (deviceId != null) {
+        if (deviceId == output.id) {
+          output.send(data, ts);
+        }
+      } else {
+        output.send(data, ts);
+      }
+    });
   }
 
   /// Stream firing events whenever a midi package is received.
