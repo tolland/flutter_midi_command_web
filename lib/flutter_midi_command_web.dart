@@ -6,9 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_midi_command_platform_interface/flutter_midi_command_platform_interface.dart';
 import 'package:flutter_midi_command_web/extensions.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
-//import 'package:js/js.dart';
 import 'package:js_bindings/js_bindings.dart' as html;
-//import 'package:typings/core.dart' as html;
 
 final List<html.MIDIInput> _webMidiInputs = [];
 final List<html.MIDIOutput> _webMidiOutputs = [];
@@ -97,9 +95,11 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
     for (var inport in inputPorts) {
       _log('connecting midi rx to: ${device.name}');
       inport.onmidimessage = allowInterop((midiMesg) {
-        _rxStreamController.add(
-            // TODO: add actual timestamp param instead of 0
-            MidiPacket((midiMesg as html.MIDIMessageEvent).data, 0, device));
+        _rxStreamController.add(MidiPacket(
+          (midiMesg as html.MIDIMessageEvent).data,
+          midiMesg.timeStamp.toInt(),
+          device,
+        ));
       });
     }
     _connectedDevices.add(device);
@@ -113,9 +113,11 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
     for (var inport in inputPorts) {
       _log('connecting midi rx to: ${device.name}');
       inport.onmidimessage = allowInterop((midiMesg) {
-        _rxStreamController.add(
-            // TODO: add actual timestamp param instead of 0
-            MidiPacket((midiMesg as html.MIDIMessageEvent).data, 0, device));
+        _rxStreamController.add(MidiPacket(
+          (midiMesg as html.MIDIMessageEvent).data,
+          midiMesg.timeStamp.toInt(),
+          device,
+        ));
       });
       _connectedDevices.remove(device);
       _setupStreamController.add("deviceDisconnected");
@@ -136,13 +138,7 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
   /// Data is an UInt8List of individual MIDI command bytes.
   @override
   void sendData(Uint8List data, {int? timestamp, String? deviceId}) {
-    // _connectedDevices.values.forEach((device) {
-    //   // print("send to $device");
-    //   device.send(data, data.length);
-    // });
-
     _webMidiOutputs.forEach((output) {
-      // print("send to $device");
       double ts = timestamp == null ? 0.0 : timestamp.toDouble();
 
       if (deviceId != null) {
