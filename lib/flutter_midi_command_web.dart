@@ -31,8 +31,6 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
   FlutterMidiCommandWeb() {
     _setupStream = _setupStreamController.stream;
     _rxStream = _rxStreamController.stream;
-
-    _initMidi();
   }
 
   Future<void> _initMidi() async {
@@ -58,6 +56,8 @@ class FlutterMidiCommandWeb extends MidiCommandPlatform {
 
   @override
   Future<List<MidiDevice>> get devices async {
+    await _initMidi();
+
     final deviceMap = <String, MidiDevice>{};
     int idCounter = 0;
     for (var input in _webMidiInputs) {
