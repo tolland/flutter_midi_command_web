@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_midi_command_platform_interface/flutter_midi_command_platform_interface.dart';
 import 'package:flutter_midi_command_web/extensions.dart';
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
-import 'package:js_bindings/js_bindings.dart' as html;
+import 'package:typings/core.dart' as html;
 
 final List<html.MIDIInput> _webMidiInputs = [];
 final List<html.MIDIOutput> _webMidiOutputs = [];
